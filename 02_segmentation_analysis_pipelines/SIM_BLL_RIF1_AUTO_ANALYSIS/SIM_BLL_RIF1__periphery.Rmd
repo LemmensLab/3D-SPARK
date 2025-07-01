@@ -578,14 +578,6 @@ wilcox <- pairwise.wilcox.test(df_temp$rim_dist_median, paste(df_temp$cond,df_te
 print(wilcox)
 wilcox = wilcox*computations
 print(wilcox)
-
-library(FSA)
-dunn_test <- dunnTest(rim_dist_median ~ paste(cond,event_type), data = df_temp, method = "bonferroni")
-print(dunn_test)
-dunn_test_selected = dunn_test$res[c(1,2,3,4,8,10,13,14,15),]
-dunn_test_selected$P.adj = dunn_test_selected$P.unadj*computations
-dunn_test_selected$P.adj[dunn_test_selected$P.adj >=1] = 1.0
-print(dunn_test_selected)
 ```
 
 ### Do a rim region (1 micron)
@@ -655,27 +647,4 @@ wilcox <- pairwise.wilcox.test(df_temp$prop_rim, paste(df_temp$cond,df_temp$even
 print(wilcox)
 wilcox = wilcox*computations
 print(wilcox)
-
-library(FSA)
-dunn_test <- dunnTest(prop_rim ~ paste(cond,event_type), data = df_temp, method = "bonferroni")
-print(dunn_test)
-dunn_test_selected = dunn_test$res[c(1,2,3,4,8,10,13,14,15),]
-dunn_test_selected$P.adj = dunn_test_selected$P.unadj*computations
-dunn_test_selected$P.adj[dunn_test_selected$P.adj >=1] = 1.0
-print(dunn_test_selected)
-```
-
-### Make random distribution of dots in 8um radius circle.
-```{r}
-set.seed(10)
-x = runif(1000000,0,20)
-y = runif(1000000,0,20)
-dist = sqrt((x-8)**2+(y-8)**2)
-dist = data.frame(dist = dist[dist <= 8])
-plot <- ggplot(dist, aes(dist)) +
-  geom_density(size = 1.1) +
-  xlim(c(0,8)) +
-  theme_bw()
-
-print(plot)
 ```

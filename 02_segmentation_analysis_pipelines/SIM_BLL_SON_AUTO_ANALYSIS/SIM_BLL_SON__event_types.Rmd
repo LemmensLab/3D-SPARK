@@ -319,27 +319,7 @@ print(plot)
 ```{r}
 k_w <- kruskal.test(number ~ paste(cond,event), data = df_temp)
 print(k_w)
-k_w <- pairwise.wilcox.test(df_temp$number, paste(df_temp$cond,df_temp$event),
+m_w <- pairwise.wilcox.test(df_temp$number, paste(df_temp$cond,df_temp$event),
                  p.adjust.method = "bonferroni")$p.value
-pairwise.wilcox.test(plot_df$initiation, plot_df$cond,
-                 p.adjust.method = "BH")
+print(m_w)
 ```
-
-```{r}
-pvalue_df = tibble(event = factor(c('initiation','ongoing','termination'),
-                          levels= c('initiation','ongoing','termination')))
-pvalue_df$.y. = rep('number',3)
-pvalue_df$group1 = rep('Mock',3)
-pvalue_df$group2 = rep('HU',3)
-pvalue_df$p.adj = apply(pvalue_df, 1, function(x){formatC(k_w[paste(x['group1'],x['event']),paste(x['group2'],x['event'])],digits = 2, format = 'g')})
-pvalue_df$y.position = c(0.31,1,0.27)
-pvalue_df$x = seq(1,3)
-pvalue_df$xmin = c(0.81,1.81,2.81)
-pvalue_df$xmax = c(1.19,2.19,3.19)
-
-plot_pval <- plot + stat_pvalue_manual(pvalue_df, label = 'p.adj')
-print(plot_pval)
-ggsave(filename = 'BLL_XZ_Exp4__event_types', plot = plot_pval, device = 'png', path = '/Users/brunourien/SciLifeLab/KI_Organized/Conferences/20241103_Heidelberg_EMBL', height = 4, width = 5,
-       dpi = 450)
-```
-

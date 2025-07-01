@@ -1,5 +1,5 @@
 ---
-title: "SIM_BLL_syncHU__segmented_numbers"
+title: "SIM_BLL_RIF1__event_types"
 ---
 
 ```{r}
@@ -30,16 +30,16 @@ setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 ## FUNCTIONS
 ```{r}
 get_cond <- function(path) {
-  cond <- str_match(path,'^(.+)/(.+)/')[2]
+  cond <- str_match(path,'^(.+)/(.+)/.*tables/')[2]
   return(cond)
 }
 get_repl <- function(path) {
-  repl <- str_match(path,'^(.+)/(.+)/')[3]
+  repl <- str_match(path,'^(.+)/(.+)/.*tables/')[3]
   return(repl)
 }
 get_metadata <- function(path) {
-  meta <- str_match(path,'^(.+)/(.+)/(.+[:digit:]+)_(.*)/')
-  return(c(meta[2],meta[3],paste(meta[4],sep='__'),meta[5],paste(meta[4],meta[5],sep='__')))
+  meta <- str_match(path,'^(.+)/(.+)/(.+[:digit:]+)_(.*)__(.*)/.*tables/')
+  return(c(meta[2],meta[3],paste(meta[4],meta[6],sep='__'),meta[5],paste(meta[4],meta[6],meta[5],sep='__')))
 }
 get_channel <- function(path) {
   channel <- str_match(path,'/.+_(.+)\\.csv\\.gz$')
@@ -169,25 +169,23 @@ res_dir <- str_extract(getwd(), '([^/]+)$')
 
 letter_size = 10
 
-paths <- Sys.glob("*/*/*/")
+paths <- Sys.glob("*/*/*/overlap_tables/two_channel_initiation__EdU_vs_dUTP_105_overlap_labels.csv.gz")
 
 L <- data.frame(path = paths)
 
-paths <- Sys.glob("*/*/*/tables/004_segmented_regions_647_dye.csv.gz")
-EdU <- map(paths, fread, header = TRUE, sep = '\t')
-names(EdU) = paths
-L$EdU <- rep(0,dim(L)[1])
-for(file in names(EdU)){
-  L$EdU[which(L$path == gsub("tables/004_segmented_regions_647_dye.csv.gz","",file))] = dim(EdU[[file]])[1]
-  }
+Init <- map(paths, fread, header = TRUE, sep = '\t')
+names(Init) = paths
+L$initiation <- sapply(Init,function(x){dim(x)[1]})
 
-paths <- Sys.glob("*/*/*/tables/004_segmented_regions_555_dye.csv.gz")
-dUTP <- map(paths, fread, header = TRUE, sep = '\t')
-names(dUTP) = paths
-L$dUTP <- rep(0,dim(L)[1])
-for(file in names(dUTP)){
-  L$dUTP[which(L$path == gsub("tables/004_segmented_regions_555_dye.csv.gz","",file))] = dim(dUTP[[file]])[1]
-  }
+paths <- Sys.glob("*/*/*/overlap_tables/two_channel_ongoing__EdU_vs_dUTP_105_overlap_labels.csv.gz")
+Ong <- map(paths, fread, header = TRUE, sep = '\t')
+names(Ong) = paths
+L$ongoing <- sapply(Ong,function(x){dim(x)[1]})
+
+paths <- Sys.glob("*/*/*/overlap_tables/two_channel_termination__EdU_vs_dUTP_105_overlap_labels.csv.gz")
+Term <- map(paths, fread, header = TRUE, sep = '\t')
+names(Term) = paths
+L$termination <- sapply(Term,function(x){dim(x)[1]})
 
 L$total = apply(L[,-c(1)],1,sum)
 
@@ -196,20 +194,18 @@ rownames(metadata) = rownames(L)
 colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
 
 L <- cbind(L,metadata)
-
-L$cond[L$cond == 'slide 3'] = '8h -HU'
-L$cond[L$cond == 'slide 4'] = '8h +HU'
-L$cond[L$cond == 'slide 5'] = '4h -HU'
-L$cond[L$cond == 'slide 6'] = '4h +HU'
-L$cond <- factor(L$cond,levels = c('4h -HU','4h +HU','8h -HU','8h +HU'))
+L = L[L$total > 100,]
 ```
 
 ```{r}
 events = L[L$segmentation == 'raw__ss_1__os_0__min_size_50__min_size_overlap_0',]
 
-events$EdU_prop = events$EdU/events$total
-events$dUTP_prop = events$dUTP/events$total
-events$EdU_vs_dUTP = log2(events$EdU/events$dUTP)
+events$initiation_prop = events$initiation/events$total
+events$ongoing_prop = events$ongoing/events$total
+events$termination_prop = events$termination/events$total
+events$ong_vs_init = events$ongoing/events$initiation
+events$ong_vs_term = events$ongoing/events$termination
+events$init_vs_term = events$initiation/events$termination
 metadata = t(sapply(events$path,get_metadata))
 rownames(metadata) = rownames(events)
 colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
@@ -224,14 +220,13 @@ events$image_alter = factor(events$image_alter)
 
 ```{r}
 ## Evaluate events
-plot_df = events[c('segmentation','cond','image','alter','image_alter','EdU','dUTP','total')]
-colnames(plot_df) = c('segmentation','cond','image','alter','image_alter','647_dye','555_dye','total')
+plot_df = events[c('segmentation','cond','image','alter','image_alter','initiation','ongoing','termination','total')]
 df_temp <- gather(plot_df, 'event','number',-c(1,2,3,4,5))
 
 plot <- ggplot(data = df_temp, aes(x = event, y = number, color = cond)) +
   geom_point(size = 1) +
   labs(x = 'condition',
-       y = 'number of segmented regions') +
+       y = 'number of events') +
   facet_grid(alter ~ cond) +
   theme_light() +
   theme(text = element_text(size = 17),
@@ -242,7 +237,7 @@ plot <- ggplot(data = df_temp, aes(x = event, y = number, fill = cond)) +
   geom_boxplot() +
   #scale_fill_manual(values = c('white','gray')) +
   labs(x = 'condition',
-       y = 'Number of segmented regions') +
+       y = 'Number of events') +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
   facet_grid(. ~ alter) +
@@ -250,15 +245,15 @@ plot <- ggplot(data = df_temp, aes(x = event, y = number, fill = cond)) +
 print(plot)
 
 ## Plotting ratio of events
-plot_df = events[c('segmentation','cond','image','alter','image_alter','EdU_prop','dUTP_prop')]
-colnames(plot_df) = c('segmentation','cond','image','alter','image_alter','647_dye','555_dye')
+plot_df = events[c('segmentation','cond','image','alter','image_alter','initiation_prop','ongoing_prop','termination_prop')]
+colnames(plot_df) = c('segmentation','cond','image','alter','image_alter','initiation','ongoing','termination')
 df_temp <- gather(plot_df, 'event','number',-c(1,2,3,4,5))
 
 plot <- ggplot(data = df_temp, aes(x = event, y = number, color = cond)) +
   geom_point(size = 1) +
   ylim(0,max(df_temp$number)) +
   labs(x = 'condition',
-       y = 'proportion (segmented region / total)') +
+       y = 'proportion (event_type / total)') +
   facet_grid(alter ~ cond) +
   theme_light() +
   theme(text = element_text(size = 17),
@@ -270,7 +265,7 @@ plot <- ggplot(data = df_temp, aes(x = event, y = number)) +
   #scale_fill_manual(name = 'Treatment', values = c('white','gray')) +
   scale_y_continuous(labels=scales::percent, breaks = seq(0.1,1,0.2)) +
   labs(x = 'condition',
-       y = 'proportion (segmented region / total)') +
+       y = 'proportion (event_type / total)') +
   theme_bw() +
   facet_grid(. ~ alter) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
@@ -284,15 +279,15 @@ print(plot)
 
 ```{r}
 ## Plotting ratio of events
-plot_df = events[c('segmentation','cond','image','alter','image_alter','EdU_vs_dUTP')]
-colnames(plot_df) = c('segmentation','cond','image','alter','image_alter','647_vs_555')
+plot_df = events[c('segmentation','cond','image','alter','image_alter','ong_vs_init','ong_vs_term','init_vs_term')]
+colnames(plot_df) = c('segmentation','cond','image','alter','image_alter','ong_vs_init','ong_vs_term','init_vs_term')
 df_temp <- gather(plot_df, 'event','number',-c(1,2,3,4,5))
 
 plot <- ggplot(data = df_temp, aes(x = event, y = number, color = cond)) +
   geom_point(size = 1) +
-  #ylim(0,max(df_temp$number)) +
+  ylim(0,max(df_temp$number)) +
   labs(x = 'condition',
-       y = 'proportion (segmetned region / total)') +
+       y = 'proportion (event_type / total)') +
   facet_grid(alter ~ cond) +
   theme_light() +
   theme(text = element_text(size = 17))
@@ -301,7 +296,7 @@ print(plot)
 plot <- ggplot(data = df_temp, aes(x = NA, y = number)) +
   geom_boxplot(aes(fill = cond)) +
   #scale_fill_manual(name = 'Treatment', values = c('white','gray')) +
-  #coord_cartesian(ylim = c(0, 10)) +
+  coord_cartesian(ylim = c(0, 10)) +
   labs(x = 'condition',
        y = 'proportion (event_type / total)') +
   theme_bw() +
@@ -317,27 +312,7 @@ print(plot)
 ```{r}
 k_w <- kruskal.test(number ~ paste(cond,event), data = df_temp)
 print(k_w)
-k_w <- pairwise.wilcox.test(df_temp$number, paste(df_temp$cond,df_temp$event),
+m_w <- pairwise.wilcox.test(df_temp$number, paste(df_temp$cond,df_temp$event),
                  p.adjust.method = "bonferroni")$p.value
-pairwise.wilcox.test(plot_df$initiation, plot_df$cond,
-                 p.adjust.method = "BH")
+print(m_w)
 ```
-
-```{r}
-pvalue_df = tibble(event = factor(c('initiation','ongoing','termination'),
-                          levels= c('initiation','ongoing','termination')))
-pvalue_df$.y. = rep('number',3)
-pvalue_df$group1 = rep('Mock',3)
-pvalue_df$group2 = rep('HU',3)
-pvalue_df$p.adj = apply(pvalue_df, 1, function(x){formatC(k_w[paste(x['group1'],x['event']),paste(x['group2'],x['event'])],digits = 2, format = 'g')})
-pvalue_df$y.position = c(0.31,1,0.27)
-pvalue_df$x = seq(1,3)
-pvalue_df$xmin = c(0.81,1.81,2.81)
-pvalue_df$xmax = c(1.19,2.19,3.19)
-
-plot_pval <- plot + stat_pvalue_manual(pvalue_df, label = 'p.adj')
-print(plot_pval)
-ggsave(filename = 'BLL_XZ_Exp4__event_types', plot = plot_pval, device = 'png', path = '/Users/brunourien/SciLifeLab/KI_Organized/Conferences/20241103_Heidelberg_EMBL', height = 4, width = 5,
-       dpi = 450)
-```
-
