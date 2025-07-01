@@ -1,0 +1,681 @@
+---
+title: "SIM_BLL_RIF1__periphery"
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+### Load packages
+```{r}
+# When ready to knit document, change all {r} with the following, then knit:
+#{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(broom)
+library(AICcmodavg)
+library(R.utils)
+library(data.table)
+library(gridExtra)
+library(plotly)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+
+### Load functions
+```{r}
+get_cond <- function(path) {
+  cond <- str_match(path,'^(.+)/(.+)/.*tables/')[2]
+  return(cond)
+}
+get_repl <- function(path) {
+  repl <- str_match(path,'^(.+)/(.+)/.*tables/')[3]
+  return(repl)
+}
+get_metadata <- function(path) {
+  meta <- str_match(path,'^(.+)/(.+)/(.+[:digit:]+)_(.*)__(.*)/.*tables/')
+  return(c(meta[2],meta[3],paste(meta[4],meta[6],sep='__'),meta[5],paste(meta[4],meta[6],meta[5],sep='__')))
+}
+get_channel <- function(path) {
+  channel <- str_match(path,'/.+_(.+)\\.csv\\.gz$')
+  return(channel[2])
+}
+```
+
+```{r}
+make_plots_general <- function(res_dir,df,measurement_colname,channel_col = FALSE){
+  if(channel_col){x_vals = df[,'channel']}
+  else{x_vals = df[,'cond']}
+  plot = ggplot(df, aes(x = x_vals, y = df[,measurement_colname])) +
+    geom_violin() +
+    labs(
+      title = paste(res_dir,'violin plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+  
+  plot = ggplot(df, aes(x = x_vals, y = df[,measurement_colname])) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_y_continuous(limits = quantile(df[,measurement_colname], c(0.1, 0.9))) +
+    labs(
+      title = paste(res_dir,'box plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+  
+  plot = ggplot(df, aes(x = df[,measurement_colname], colour = x_vals)) +
+    geom_density() +
+    labs(
+      title = paste(res_dir,'distance density plot',sep = '\n'),
+      x = measurement_colname,
+      y = "Density"
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+  
+  plot = ggplot(L, aes(x = df[,measurement_colname], colour = x_vals)) +
+    geom_density(stat='bin',bins=30) +
+    labs(
+      title = paste(res_dir,'distance event count profile (30-bin)',sep = '\n'),
+      x = measurement_colname,
+      y = "Count"
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+}
+```
+
+```{r}
+make_plots_per_image <- function(res_dir,df,measurement_colname,channel_col = FALSE){
+  for(level in levels(as.factor(df$cond))){
+    for(sublevel in levels(as.factor(df$alter))){
+      df_sub = df[df$cond == level,]
+      df_sub = df_sub[df_sub$alter == sublevel,]
+      if(dim(df_sub)[1] == 0){next}
+      if(channel_col){x_vals = df_sub[,'channel']}
+      else{x_vals = df_sub[,'image']}
+      plot <- ggplot(df_sub, aes(x = x_vals, y = df_sub[,measurement_colname])) +
+        geom_violin() +
+        labs(
+          title = paste(res_dir, level,sublevel,'violin plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+      
+      plot = ggplot(df_sub, aes(x = x_vals, y = df_sub[,measurement_colname])) +
+        geom_boxplot(outlier.shape = NA) +
+        scale_y_continuous(limits = quantile(df_sub[,measurement_colname], c(0.1, 0.9))) +
+        labs(
+          title = paste(res_dir, level,sublevel,'box plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+    
+      plot <- ggplot(df_sub, aes(x = df_sub[,measurement_colname], colour = x_vals)) +
+        geom_density() +
+        labs(
+          title = paste(res_dir, level,sublevel,'distance density plot',sep = '\n'),
+          x = measurement_colname,
+          y = "Density"
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+      
+      plot <- ggplot(df_sub, aes(x = df_sub[,measurement_colname], colour = x_vals)) +
+        geom_density(stat='bin',bins=30) +
+        labs(
+          title = paste(res_dir, level,'Number of events per image',sep = '\n'),
+          x = measurement_colname,
+          y = "Count"
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+    }
+  }
+}  
+```
+
+```{r}
+summarise_every_image <- function(res_dir,df,measurement_colnames){
+    
+  data_metrics = df %>% group_by(segmentation,cond,image,alter,channel) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, median = median, sd = sd)))
+  return(data_metrics)
+}
+
+summarise_per_cond <- function(res_dir,df,measurement_colnames,channel_col = FALSE){
+  if(channel_col){
+    data_metrics = df %>% group_by(cond,image,alter,channel) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, sd = sd)))
+  }
+  else{
+    data_metrics = df %>% group_by(cond,alter) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, sd = sd)))}
+  return(data_metrics)
+}
+```
+
+```{r}
+merge_rows <- function(group) {
+  group %>%
+    summarise(
+      across(everything(), ~ first(na.omit(.)), .names = "{col}"),
+      dUTP_0 = first(na.omit(dUTP_0)),
+      dUTP_1 = first(na.omit(dUTP_1))
+    )
+}
+
+merge_rows2 <- function(group) {
+  group %>%
+    summarise(
+      across(everything(), ~ first(na.omit(.)), .names = "{col}"),
+      EdU_0 = first(na.omit(EdU_0)),
+      EdU_1 = first(na.omit(EdU_1))
+    )
+}
+```
+
+
+# PERIPHERY DOMAIN ANALYSIS
+
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- c(Sys.glob("raw_*/*/*/tables/007_dist_to_core_and_rim_EdU.csv.gz"),
+           Sys.glob("raw_*/*/*/tables/007_dist_to_core_and_rim_dUTP.csv.gz"))
+L <- map(paths, fread, header = TRUE, sep = '\t')
+names(L) = paths
+L <- dplyr::bind_rows(L, .id = "path")
+colnames(L) <- str_replace_all(colnames(L),' ','_')
+metadata = t(sapply(L$path,get_metadata))
+rownames(metadata) = rownames(L)
+colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
+L <- cbind(L,metadata)
+L$channel = sapply(L$path,function(x){str_match(string = x,pattern = '_([:alpha:]+)\\.csv\\.gz$')[2]})
+
+event_count <- data.frame(table(L$cond))
+colnames(event_count) <- c('condition','single_overlap_count')
+print(event_count)
+for(level in levels(as.factor(L$cond))){
+  event_count <- data.frame(table(L[L$cond == level,]$image_alter))
+  colnames(event_count) <- c(level,'single_overlap_count')
+  print(event_count)
+}
+L$cond[L$cond == 'slide 5_rifko'] = 'RIF1 -/-'
+L$cond[L$cond == 'slide 6_RPEWT'] = 'RIF1 WT'
+L$cond <- factor(L$cond,levels = c('RIF1 WT','RIF1 -/-'))
+L$image <- factor(L$image)
+L$alter <- factor(L$alter)
+L$image_alter <- factor(L$image_alter)
+
+L$rim_dist = L$rim_dist*0.025  ## conversion pixel to um
+L$core_dist = L$core_dist*0.025  ## conversion pixel to um
+```
+
+## --- Ongoing forks ---
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- c(Sys.glob("raw_*/*/*/overlap_tables/*_ongoing__EdU_vs_dUTP_105_overlap_labels.csv.gz"))
+ongoing <- map(paths, fread, header = TRUE, sep = '\t')
+names(ongoing) = paths
+ongoing <- dplyr::bind_rows(ongoing, .id = "path")
+colnames(ongoing) <- str_replace_all(colnames(ongoing),' ','_')
+metadata = t(sapply(ongoing$path,get_metadata))
+rownames(metadata) = rownames(ongoing)
+colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
+ongoing <- cbind(ongoing,metadata)
+ongoing$channel = sapply(ongoing$path,function(x){str_match(string = x,pattern = '_([:alpha:]+)\\.csv\\.gz$')[2]})
+
+ongoing$cond[ongoing$cond == 'slide 5_rifko'] = 'RIF1 -/-'
+ongoing$cond[ongoing$cond == 'slide 6_RPEWT'] = 'RIF1 WT'
+ongoing$cond <- factor(ongoing$cond,levels = c('RIF1 WT','RIF1 -/-'))
+ongoing$image <- factor(ongoing$image)
+ongoing$alter <- factor(ongoing$alter)
+ongoing$image_alter <- factor(ongoing$image_alter)
+
+ong = data.frame()
+for (image_id in levels(ongoing$image)){
+  ong = rbind(ong, L[((L$image == image_id) & (L$channel == 'EdU') & (L$INDEX %in% ongoing$EdU[ongoing$image == image_id])),])
+  #ong = rbind(ong, L[((L$image == image_id) & (L$channel == 'dUTP') & (L$INDEX %in% ongoing$dUTP[ongoing$image == image_id])),])
+}
+```
+
+## Initiation events
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- c(Sys.glob("raw_*/*/*/overlap_tables/*_initiation__EdU_vs_dUTP_105_overlap_labels.csv.gz"))
+initiation <- map(paths, fread, header = TRUE, sep = '\t')
+names(initiation) = paths
+initiation <- dplyr::bind_rows(initiation, .id = "path")
+colnames(initiation) <- str_replace_all(colnames(initiation),' ','_')
+metadata = t(sapply(initiation$path,get_metadata))
+rownames(metadata) = rownames(initiation)
+colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
+initiation <- cbind(initiation,metadata)
+initiation$channel = sapply(initiation$path,function(x){str_match(string = x,pattern = '_([:alpha:]+)\\.csv\\.gz$')[2]})
+
+initiation$cond[initiation$cond == 'slide 5_rifko'] = 'RIF1 -/-'
+initiation$cond[initiation$cond == 'slide 6_RPEWT'] = 'RIF1 WT'
+initiation$cond <- factor(initiation$cond,levels = c('RIF1 WT','RIF1 -/-'))
+initiation$image <- factor(initiation$image)
+initiation$alter <- factor(initiation$alter)
+initiation$image_alter <- factor(initiation$image_alter)
+
+init = data.frame()
+for (image_id in levels(initiation$image)){
+  init = rbind(init, L[((L$image == image_id) & (L$channel == 'EdU') & (L$INDEX %in% initiation$EdU[initiation$image == image_id])),])
+  #init = rbind(init, L[((L$image == image_id) & (L$channel == 'dUTP_0') & (L$INDEX %in% initiation$dUTP[initiation$image == image_id])),])
+  #init = rbind(init, L[((L$image == image_id) & (L$channel == 'dUTP_1') & (L$INDEX %in% initiation$dUTP[initiation$image == image_id])),])
+}
+```
+
+## Termination events
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- c(Sys.glob("raw_*/*/*/overlap_tables/*_termination__EdU_vs_dUTP_105_overlap_labels.csv.gz"))
+termination <- map(paths, fread, header = TRUE, sep = '\t')
+names(termination) = paths
+termination <- dplyr::bind_rows(termination, .id = "path")
+colnames(termination) <- str_replace_all(colnames(termination),' ','_')
+metadata = t(sapply(termination$path,get_metadata))
+rownames(metadata) = rownames(termination)
+colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
+termination <- cbind(termination,metadata)
+termination$channel = sapply(termination$path,function(x){str_match(string = x,pattern = '_([:alpha:]+)\\.csv\\.gz$')[2]})
+
+termination$cond[termination$cond == 'slide 5_rifko'] = 'RIF1 -/-'
+termination$cond[termination$cond == 'slide 6_RPEWT'] = 'RIF1 WT'
+termination$cond <- factor(termination$cond,levels = c('RIF1 WT','RIF1 -/-'))
+termination$image <- factor(termination$image)
+termination$alter <- factor(termination$alter)
+termination$image_alter <- factor(termination$image_alter)
+
+term = data.frame()
+for (image_id in levels(termination$image)){
+  #term = rbind(term, L[((L$image == image_id) & (L$channel == 'EdU_0') & (L$INDEX %in% termination$EdU[termination$image == image_id])),])
+  #term = rbind(term, L[((L$image == image_id) & (L$channel == 'EdU_1') & (L$INDEX %in% termination$EdU[termination$image == image_id])),])
+  term = rbind(term, L[((L$image == image_id) & (L$channel == 'dUTP') & (L$INDEX %in% termination$dUTP[termination$image == image_id])),])
+}
+```
+
+### Add column with the ranges of distances close to SON: SON_data_EdU/dUTP
+```{r}
+plot <- ggplot(L, aes(rim_dist, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('gray','darkorange')) +
+  coord_cartesian(xlim = c(0,8)) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.direction = "out",
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", colour = "white"),
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  ) +
+  labs(title = 'segmented regions - distance to envelope',
+       x = 'distance to envelope (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+```
+
+```{r}
+value_cols = c('rim_dist')
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,L,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,L,value_cols))
+print(c(min(metrics_every_image$rim_dist_median),max(metrics_every_image$rim_dist_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    #coord_cartesian(ylim(c(1.5,4))) +
+    labs(title = paste(measurement_colname,'','median per image',sep=' - '),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('gray','darkorange')) +
+    theme_minimal(base_size = 20) +
+  theme(
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.direction = "out",
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.position = "none",
+    plot.background = element_rect(fill = "white", colour = "white"),
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  ) +
+  labs(title = 'median per nucleus - distance to envelope',
+       y = 'distance to envelope (micrometer)',
+       x = '') +
+    coord_flip()
+  print(plot)
+}
+```
+
+
+```{r}
+plot <- ggplot(ong, aes(rim_dist, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('lightblue2','darkorange')) +
+  xlim(c(0,8)) +
+  theme_bw() +
+  labs(title = 'ongoing forks - distance to envelope',
+       x = 'distance to envelope (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+
+plot <- ggplot(init, aes(rim_dist, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('lightblue2','darkorange')) +
+  xlim(c(0,8)) +
+  theme_bw() +
+  labs(title = 'initiation events - distance to envelope',
+       x = 'distance to envelope (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+
+plot <- ggplot(term, aes(rim_dist, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('lightblue2','darkorange')) +
+  xlim(c(0,8)) +
+  theme_bw() +
+  labs(title = 'termination events - distance to envelope',
+       x = 'distance to envelope (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+```
+
+```{r}
+value_cols = c('rim_dist')
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,ong,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,ong,value_cols))
+print(c(min(metrics_every_image$rim_dist_median),max(metrics_every_image$rim_dist_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    ylim(c(1.5,4)) +
+    labs(title = paste(measurement_colname,'','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    #facet_grid(channel ~ alter) +
+    coord_flip()
+  print(plot)
+}
+
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,init,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,init,value_cols))
+print(c(min(metrics_every_image$rim_dist_median),max(metrics_every_image$rim_dist_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    ylim(c(1.5,4)) +
+    labs(title = paste(measurement_colname,'','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    #facet_grid(channel ~ alter) +
+    coord_flip()
+  print(plot)
+}
+
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,term,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,term,value_cols))
+print(c(min(metrics_every_image$rim_dist_median),max(metrics_every_image$rim_dist_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    ylim(c(1.5,4)) +
+    labs(title = paste(measurement_colname,'','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    #facet_grid(channel ~ alter) +
+    coord_flip()
+  print(plot)
+}
+```
+
+### Merge everything in single plot
+```{r}
+L$event_type = rep("all_regs",dim(L)[1])
+init$event_type = rep("initiation",dim(init)[1])
+ong$event_type = rep("ongoing",dim(ong)[1])
+term$event_type = rep("termination",dim(term)[1])
+all_data = rbind(L,init,ong,term)
+
+plot <- ggplot(all_data, aes(rim_dist, color = event_type)) +
+  geom_density(size = 1.1) +
+  #scale_color_manual(values = c('gray','darkorange')) +
+  coord_cartesian(xlim = c(0,8)) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.direction = "out",
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", colour = "white"),
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  ) +
+  labs(title = 'distance to envelope',
+       x = 'distance to envelope (micrometer)') +
+  facet_grid(cond ~ .)
+print(plot)
+
+value_cols = c("rim_dist")
+metrics_every_image = all_data %>% 
+  group_by(segmentation,cond,image,alter,event_type) %>% 
+  na.omit() %>% 
+  summarise(across(value_cols, list(mean = mean, median = median, sd = sd)))
+mean_col = paste(value_cols,'mean',sep = '_')
+median_col = paste(value_cols,'median',sep = '_')
+sd_col = paste(value_cols,'sd',sep = '_')
+plot <- ggplot(metrics_every_image, aes(x = event_type, y = rim_dist_median)) +
+  geom_violin(aes(fill = event_type)) +
+  geom_boxplot(width = 0.2) +
+  geom_point(size = 0.5) +
+  #ylim(c(1.5,4)) +
+  labs(title = paste(value_cols,'','median per image',sep='\n'),
+      x = 'condition',
+      y = value_cols) +
+  #scale_fill_manual(values = c('lightblue2','darkorange')) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+      text = element_text(size = 10)) +
+  facet_grid(. ~ cond) #+coord_flip()
+print(plot)
+```
+
+```{r}
+df_temp = metrics_every_image[metrics_every_image$event_type != "all_regs",]
+
+k_w <- kruskal.test(rim_dist_median ~ paste(cond,event_type), data = df_temp)
+print(k_w)
+wilcox <- pairwise.wilcox.test(df_temp$rim_dist_median, paste(df_temp$cond,df_temp$event_type),
+                 p.adjust.method = "bonferroni")$p.value
+print(wilcox)
+computations = 3+2*(2+1)
+wilcox <- pairwise.wilcox.test(df_temp$rim_dist_median, paste(df_temp$cond,df_temp$event_type),
+                 p.adjust.method = "none")$p.value
+print(wilcox)
+wilcox = wilcox*computations
+print(wilcox)
+
+library(FSA)
+dunn_test <- dunnTest(rim_dist_median ~ paste(cond,event_type), data = df_temp, method = "bonferroni")
+print(dunn_test)
+dunn_test_selected = dunn_test$res[c(1,2,3,4,8,10,13,14,15),]
+dunn_test_selected$P.adj = dunn_test_selected$P.unadj*computations
+dunn_test_selected$P.adj[dunn_test_selected$P.adj >=1] = 1.0
+print(dunn_test_selected)
+```
+
+### Do a rim region (1 micron)
+```{r}
+all_data$close_to_rim = all_data$rim_dist < 1
+summary_close_to_rim = table(all_data$close_to_rim, all_data$event_type, all_data$cond)
+prop_data = rbind(
+  data.frame(cond = rep("RIF1 WT",4), event_type = c("all_regs","initiation","ongoing","termination"),
+             prop_rim = summary_close_to_rim[2,,1]/(summary_close_to_rim[1,,1]+summary_close_to_rim[2,,1])),
+  data.frame(cond = rep("RIF1 -/-",4), event_type = c("all_regs","initiation","ongoing","termination"),
+             prop_rim = summary_close_to_rim[2,,2]/(summary_close_to_rim[1,,2]+summary_close_to_rim[2,,2]))
+)
+
+plot <- ggplot(prop_data, aes(x = event_type, y = prop_rim, color = cond)) +
+  geom_point() +
+  #scale_color_manual(values = c('gray','darkorange')) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.direction = "out",
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", colour = "white"),
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  ) +
+  labs(title = 'distance to envelope',
+       x = '') #+facet_grid(cond ~ .)
+print(plot)
+
+value_cols = c("close_to_rim")
+metrics_every_image = all_data %>% 
+  group_by(segmentation,cond,image,alter,event_type) %>% 
+  na.omit() %>% 
+  summarise(prop_rim = sum(close_to_rim)/length(close_to_rim))
+plot <- ggplot(metrics_every_image, aes(x = event_type, y = prop_rim)) +
+  geom_violin(aes(fill = event_type)) +
+  geom_boxplot(width = 0.2) +
+  geom_point(size = 0.5) +
+  #ylim(c(1.5,4)) +
+  labs(title = paste(value_cols,'','median per image',sep='\n'),
+      x = 'condition',
+      y = value_cols) +
+  #scale_fill_manual(values = c('lightblue2','darkorange')) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+      text = element_text(size = 10)) +
+  facet_grid(. ~ cond) #+coord_flip()
+print(plot)
+```
+
+```{r}
+df_temp = metrics_every_image#[metrics_every_image$event_type != "all_regs",]
+
+k_w <- kruskal.test(prop_rim ~ paste(cond,event_type), data = df_temp)
+print(k_w)
+wilcox <- pairwise.wilcox.test(df_temp$prop_rim, paste(df_temp$cond,df_temp$event_type),
+                 p.adjust.method = "bonferroni")$p.value
+print(wilcox)
+computations = 3+2*(2+1)
+wilcox <- pairwise.wilcox.test(df_temp$prop_rim, paste(df_temp$cond,df_temp$event_type),
+                 p.adjust.method = "none")$p.value
+print(wilcox)
+wilcox = wilcox*computations
+print(wilcox)
+
+library(FSA)
+dunn_test <- dunnTest(prop_rim ~ paste(cond,event_type), data = df_temp, method = "bonferroni")
+print(dunn_test)
+dunn_test_selected = dunn_test$res[c(1,2,3,4,8,10,13,14,15),]
+dunn_test_selected$P.adj = dunn_test_selected$P.unadj*computations
+dunn_test_selected$P.adj[dunn_test_selected$P.adj >=1] = 1.0
+print(dunn_test_selected)
+```
+
+### Make random distribution of dots in 8um radius circle.
+```{r}
+set.seed(10)
+x = runif(1000000,0,20)
+y = runif(1000000,0,20)
+dist = sqrt((x-8)**2+(y-8)**2)
+dist = data.frame(dist = dist[dist <= 8])
+plot <- ggplot(dist, aes(dist)) +
+  geom_density(size = 1.1) +
+  xlim(c(0,8)) +
+  theme_bw()
+
+print(plot)
+```

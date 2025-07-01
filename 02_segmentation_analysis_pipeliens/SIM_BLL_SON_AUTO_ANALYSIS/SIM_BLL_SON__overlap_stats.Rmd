@@ -1,0 +1,231 @@
+---
+title: "SIM_BLL_SON__overlap_stats"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+#### PUT THIS FILE IN THE RESULTING FOLDER FROM THE PYTHON SEGMENTATION
+
+## LOAD PACKAGES
+```{r}
+# When ready to knit document, change all {r} with the following, then knit:
+#{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(broom)
+library(AICcmodavg)
+library(R.utils)
+library(data.table)
+library(gridExtra)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+## FUNCTIONS
+```{r}
+get_cond <- function(path) {
+  cond <- str_match(path,'^(.+)/(.+)/.*tables/')[2]
+  return(cond)
+}
+get_repl <- function(path) {
+  repl <- str_match(path,'^(.+)/(.+)/.*tables/')[3]
+  return(repl)
+}
+get_metadata <- function(path) {
+  meta <- str_match(path,'^(.+)/(.+)/(.+[:digit:]+)_(.*)/.*tables/')
+  return(c(meta[2],meta[3],paste(meta[4],sep='__'),meta[5],paste(meta[4],meta[5],sep='__')))
+}
+get_channel <- function(path) {
+  channel <- str_match(path,'/.+_(.+)\\.csv\\.gz$')
+  return(channel[2])
+}
+```
+
+```{r}
+make_plots_general <- function(res_dir,df,measurement_colname){
+  measurement_colname = sym(measurement_colname)
+  plot = ggplot(df, aes(x = cond, y = !!measurement_colname)) +
+    geom_violin() +
+    labs(
+      title = paste(res_dir,'violin plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    facet_grid(. ~ alter) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+  
+  plot = ggplot(df, aes(x = cond, y = !!measurement_colname)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_y_continuous(limits = quantile(df[[measurement_colname]], c(0.1, 0.9))) +
+    labs(
+      title = paste(res_dir,'box plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    facet_grid(. ~ alter) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+  
+  plot = ggplot(df, aes(x = !!measurement_colname, colour = cond)) +
+    geom_density() +
+    labs(
+      title = paste(res_dir,'distance density plot',sep = '\n'),
+      x = measurement_colname,
+      y = "Density"
+    ) +
+    facet_grid(alter ~ .) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+  
+  plot = ggplot(L, aes(x = !!measurement_colname, colour = cond)) +
+    geom_density(stat='bin',bins=30) +
+    labs(
+      title = paste(res_dir,'distance event count profile (30-bin)',sep = '\n'),
+      x = measurement_colname,
+      y = "Count"
+    ) +
+    facet_grid(alter ~ .) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+}
+```
+
+```{r}
+make_plots_per_image <- function(res_dir,df,measurement_colname){
+  measurement_colname = sym(measurement_colname)
+  for(level in levels(as.factor(df$cond))){
+    for(sublevel in levels(as.factor(df$alter))){
+      df_sub = df[df$cond == level,]
+      df_sub = df_sub[df_sub$alter == sublevel,]
+      plot <- ggplot(df_sub, aes(x = image, y = !!measurement_colname)) +
+        geom_violin() +
+        labs(
+          title = paste(res_dir, level,sublevel,'violin plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme_classic(base_size = letter_size)
+      print(plot)
+      
+      plot = ggplot(df_sub, aes(x = image, y = !!measurement_colname)) +
+        geom_boxplot(outlier.shape = NA) +
+        scale_y_continuous(limits = quantile(df_sub[[measurement_colname]], c(0.1, 0.9))) +
+        labs(
+          title = paste(res_dir, level,sublevel,'box plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme_classic(base_size = letter_size)
+      print(plot)
+    
+      plot <- ggplot(df_sub, aes(x = !!measurement_colname, colour = image)) +
+        geom_density() +
+        labs(
+          title = paste(res_dir, level,sublevel,'distance density plot',sep = '\n'),
+          x = measurement_colname,
+          y = "Density"
+        ) +
+        theme_classic(base_size = letter_size)
+      print(plot)
+      
+      plot <- ggplot(df_sub, aes(x = !!measurement_colname, colour = image)) +
+        geom_density(stat='bin',bins=30) +
+        labs(
+          title = paste(res_dir, level,'Number of events per image',sep = '\n'),
+          x = measurement_colname,
+          y = "Count"
+        ) +
+        theme_classic(base_size = letter_size)  
+      print(plot)
+    }
+  }
+}  
+```
+
+```{r}
+summarise_every_image <- function(res_dir,df,measurement_colnames){
+  data_metrics = df %>% group_by(path,cond,image,alter) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, median = median, sd = sd)))
+  return(data_metrics)
+}
+
+summarise_per_cond <- function(res_dir,df,measurement_colnames){
+  data_metrics = df %>% group_by(cond,alter) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, sd = sd)))
+  return(data_metrics)
+}
+```
+
+## OVERLAP RESULTS
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- Sys.glob("*/*/*/overlap_tables/two_channel_ongoing__647_dye_vs_555_dye_106_overlap_measurements.csv.gz")
+L <- map(paths, fread, header = TRUE, sep = '\t')
+names(L) = paths
+L <- dplyr::bind_rows(L, .id = "path")
+colnames(L) <- str_replace_all(colnames(L),' ','_')
+metadata = t(sapply(L$path,get_metadata))
+rownames(metadata) = rownames(L)
+colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
+L <- cbind(L,metadata) 
+
+event_count <- data.frame(table(L$cond))
+colnames(event_count) <- c('condition','single_overlap_count')
+print(event_count)
+for(level in levels(as.factor(L$cond))){
+  event_count <- data.frame(table(L[L$cond == level,]$image_alter))
+  colnames(event_count) <- c(level,'single_overlap_count')
+  print(event_count)
+}
+
+L$cond <- factor(L$cond)
+L$image <- factor(L$image)
+L$alter <- factor(L$alter)
+L$image_alter <- factor(L$image_alter)
+```
+
+```{r}
+L_sub = L[L$segmentation == 'raw__ss_1__os_0__min_size_50__min_size_overlap_0',]
+L_sub = L_sub[L_sub$cond == "Short",]
+```
+
+
+```{r}
+value_cols = colnames(L_sub)[seq(4,length(colnames(L_sub))-5,1)]
+for(colname in value_cols){make_plots_general(res_dir,L_sub,colname)}
+```
+
+```{r}
+value_cols = colnames(L_sub)[seq(4,length(colnames(L_sub))-5,1)]
+for(colname in value_cols){make_plots_per_image(res_dir,L_sub,colname)}
+```
+
+```{r}
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,L_sub,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,L_sub,value_cols))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_boxplot(aes(fill = cond)) +
+    labs(title = paste(measurement_colname,'','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    facet_grid(. ~ alter)
+  print(plot)
+}
+```

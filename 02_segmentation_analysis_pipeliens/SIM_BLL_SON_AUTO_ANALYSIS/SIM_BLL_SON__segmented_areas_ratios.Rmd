@@ -1,0 +1,386 @@
+---
+title: "SIM_BLL_SON__segmented_areas_ratios"
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+#### PUT THIS FILE IN THE RESULTING FOLDER FROM THE PYTHON SEGMENTATION
+
+## LOAD PACKAGES
+```{r}
+# When ready to knit document, change all {r} with the following, then knit:
+#{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(broom)
+library(AICcmodavg)
+library(R.utils)
+library(data.table)
+library(gridExtra)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+## FUNCTIONS
+```{r}
+get_cond <- function(path) {
+  cond <- str_match(path,'^(.+)/(.+)/')[2]
+  return(cond)
+}
+get_repl <- function(path) {
+  repl <- str_match(path,'^(.+)/(.+)/')[3]
+  return(repl)
+}
+get_metadata <- function(path) {
+  meta <- str_match(path,'^(.+)/(.+)/(.+[:digit:]+)_(.*)/')
+  return(c(meta[2],meta[3],paste(meta[4],sep='__'),meta[5],paste(meta[4],meta[5],sep='__')))
+}
+get_channel <- function(path) {
+  channel <- str_match(path,'/.+_(.+)\\.csv\\.gz$')
+  return(channel[2])
+}
+```
+
+```{r}
+make_plots_general <- function(res_dir,df,measurement_colname){
+  measurement_colname = sym(measurement_colname)
+  plot = ggplot(df, aes(x = cond, y = !!measurement_colname)) +
+    geom_violin() +
+    labs(
+      title = paste(res_dir,'violin plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    facet_grid(. ~ alter) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+  
+  plot = ggplot(df, aes(x = cond, y = !!measurement_colname)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_y_continuous(limits = quantile(df[[measurement_colname]], c(0.1, 0.9))) +
+    labs(
+      title = paste(res_dir,'box plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    facet_grid(. ~ alter) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+  
+  plot = ggplot(df, aes(x = !!measurement_colname, colour = cond)) +
+    geom_density() +
+    labs(
+      title = paste(res_dir,'distance density plot',sep = '\n'),
+      x = measurement_colname,
+      y = "Density"
+    ) +
+    facet_grid(alter ~ .) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+  
+  plot = ggplot(L, aes(x = !!measurement_colname, colour = cond)) +
+    geom_density(stat='bin',bins=30) +
+    labs(
+      title = paste(res_dir,'distance event count profile (30-bin)',sep = '\n'),
+      x = measurement_colname,
+      y = "Count"
+    ) +
+    facet_grid(alter ~ .) +
+    theme_classic(base_size = letter_size)
+  print(plot)
+}
+```
+
+```{r}
+make_plots_per_image <- function(res_dir,df,measurement_colname){
+  measurement_colname = sym(measurement_colname)
+  for(level in levels(as.factor(df$cond))){
+    for(sublevel in levels(as.factor(df$alter))){
+      df_sub = df[df$cond == level,]
+      df_sub = df_sub[df_sub$alter == sublevel,]
+      plot <- ggplot(df_sub, aes(x = image, y = !!measurement_colname)) +
+        geom_violin() +
+        labs(
+          title = paste(res_dir, level,sublevel,'violin plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme_classic(base_size = letter_size)
+      print(plot)
+      
+      plot = ggplot(df_sub, aes(x = image, y = !!measurement_colname)) +
+        geom_boxplot(outlier.shape = NA) +
+        scale_y_continuous(limits = quantile(df_sub[[measurement_colname]], c(0.1, 0.9))) +
+        labs(
+          title = paste(res_dir, level,sublevel,'box plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme_classic(base_size = letter_size)
+      print(plot)
+    
+      plot <- ggplot(df_sub, aes(x = !!measurement_colname, colour = image)) +
+        geom_density() +
+        labs(
+          title = paste(res_dir, level,sublevel,'distance density plot',sep = '\n'),
+          x = measurement_colname,
+          y = "Density"
+        ) +
+        theme_classic(base_size = letter_size)
+      print(plot)
+      
+      plot <- ggplot(df_sub, aes(x = !!measurement_colname, colour = image)) +
+        geom_density(stat='bin',bins=30) +
+        labs(
+          title = paste(res_dir, level,'Number of events per image',sep = '\n'),
+          x = measurement_colname,
+          y = "Count"
+        ) +
+        theme_classic(base_size = letter_size)  
+      print(plot)
+    }
+  }
+}  
+```
+
+```{r}
+summarise_every_image <- function(res_dir,df,measurement_colnames){
+  data_metrics = df %>% group_by(path,cond,image,alter) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, median = median, sd = sd,)))
+  return(data_metrics)
+}
+
+summarise_per_cond <- function(res_dir,df,measurement_colnames){
+  data_metrics = df %>% group_by(cond,alter) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, sd = sd)))
+  return(data_metrics)
+}
+```
+
+## OVERLAP_ONGOING REGIONS RESULTS
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- Sys.glob("*/*/*/")
+
+L <- data.frame(path = paths)
+
+paths <- Sys.glob("*/*/*/layers/006_roi_mask_pseudo3D.npy.gz")
+paths_to_clean <- gsub("\\.gz$","",paths)
+L$nuclei <- rep(0,dim(L)[1])
+library(reticulate)
+np <- import("numpy")
+for(file_pos in seq(length(paths))){
+  gunzip(paths[file_pos], remove = FALSE)
+  temp_layer <- np$load(paths_to_clean[file_pos], allow_pickle = TRUE)
+  L$nuclei[which(L$path == gsub("layers/006_roi_mask_pseudo3D.npy.gz","",paths[file_pos]))] = sum(temp_layer)
+}
+file.remove(paths_to_clean)
+
+paths <- Sys.glob("*/*/*/tables/004_segmented_regions_EdU.csv.gz")
+EdU <- map(paths, fread, header = TRUE, sep = '\t')
+names(EdU) = paths
+L$EdU <- rep(0,dim(L)[1])
+for(file in names(EdU)){
+  L$EdU[which(L$path == gsub("tables/004_segmented_regions_EdU.csv.gz","",file))] = sum(EdU[[file]]$area)
+}
+
+paths <- Sys.glob("*/*/*/tables/004_segmented_regions_dUTP.csv.gz")
+dUTP <- map(paths, fread, header = TRUE, sep = '\t')
+names(dUTP) = paths
+L$dUTP <- rep(0,dim(L)[1])
+for(file in names(dUTP)){
+  L$dUTP[which(L$path == gsub("tables/004_segmented_regions_dUTP.csv.gz","",file))] = sum(dUTP[[file]]$area)
+}
+
+paths <- Sys.glob("*/*/*/tables/004_segmented_regions_SON.csv.gz")
+SON <- map(paths, fread, header = TRUE, sep = '\t')
+names(SON) = paths
+L$SON <- rep(0,dim(L)[1])
+for(file in names(SON)){
+  L$SON[which(L$path == gsub("tables/004_segmented_regions_SON.csv.gz","",file))] = sum(SON[[file]]$area)
+}
+
+paths <- Sys.glob("*/*/*/overlap_tables/two_channel_common__EdU_vs_dUTP_102_intersection_regions.csv.gz")
+overlap_EdU_dUTP <- map(paths, fread, header = TRUE, sep = '\t')
+names(overlap_EdU_dUTP) = paths
+L$overlap_EdU_dUTP <- rep(0,dim(L)[1])
+for(file in names(overlap_EdU_dUTP)){
+  L$overlap_EdU_dUTP[which(L$path == gsub("overlap_tables/two_channel_common__EdU_vs_dUTP_102_intersection_regions.csv.gz","",file))] = sum(overlap_EdU_dUTP[[file]]$area)
+}
+
+paths <- Sys.glob("*/*/*/overlap_tables/two_channel_common__EdU_vs_SON_102_intersection_regions.csv.gz")
+overlap_EdU_SON <- map(paths, fread, header = TRUE, sep = '\t')
+names(overlap_EdU_SON) = paths
+L$overlap_EdU_SON <- rep(0,dim(L)[1])
+for(file in names(overlap_EdU_SON)){
+  L$overlap_EdU_SON[which(L$path == gsub("overlap_tables/two_channel_common__EdU_vs_SON_102_intersection_regions.csv.gz","",file))] = sum(overlap_EdU_SON[[file]]$area)
+}
+
+paths <- Sys.glob("*/*/*/overlap_tables/two_channel_common__dUTP_vs_SON_102_intersection_regions.csv.gz")
+overlap_dUTP_SON <- map(paths, fread, header = TRUE, sep = '\t')
+names(overlap_dUTP_SON) = paths
+L$overlap_dUTP_SON <- rep(0,dim(L)[1])
+for(file in names(overlap_dUTP_SON)){
+  L$overlap_dUTP_SON[which(L$path == gsub("overlap_tables/two_channel_common__dUTP_vs_SON_102_intersection_regions.csv.gz","",file))] = sum(overlap_dUTP_SON[[file]]$area)
+}
+
+L$total = apply(L[,-c(1)],1,sum)
+
+metadata = t(sapply(L$path,get_metadata))
+rownames(metadata) = rownames(L)
+colnames(metadata) = c('segmentation','cond','image','alter','image_alter')
+
+L <- cbind(L,metadata)
+
+L$cond[L$cond == 'slide 1'] = 'Short'
+L$cond[L$cond == 'slide 2'] = 'Long'
+L$cond <- factor(L$cond,levels = c('Short','Long'))
+L$image <- factor(L$image)
+L$alter <- factor(L$alter)
+L$image_alter <- factor(L$image_alter)
+```
+
+```{r}
+events = L[L$segmentation == 'raw__ss_1__os_0__min_size_50__min_size_overlap_0' & L$cond == 'Short',]
+
+events$EdU_prop = events$EdU/events$nuclei
+events$dUTP_prop = events$dUTP/events$nuclei
+events$SON_prop = events$SON/events$nuclei
+events$EdU_vs_dUTP_exp = events$EdU_prop*events$dUTP_prop
+events$EdU_vs_SON_exp = events$EdU_prop*events$SON_prop
+events$dUTP_vs_SON_exp = events$dUTP_prop*events$SON_prop
+events$EdU_vs_dUTP_obs = events$overlap_EdU_dUTP/events$nuclei
+events$EdU_vs_SON_obs = events$overlap_EdU_SON/events$nuclei
+events$dUTP_vs_SON_obs = events$overlap_dUTP_SON/events$nuclei
+
+ggplot(data = events, aes(x = EdU_vs_dUTP_exp, y = EdU_vs_dUTP_obs)) + geom_point(size = 1) + geom_abline(slope = 1, intercept = 0) + geom_smooth(method='loess', color = 'blue')
+
+ggplot(data = events, aes(x = EdU_vs_SON_exp, y = EdU_vs_SON_obs)) + geom_point(size = 1) + geom_abline(slope = 1, intercept = 0) + geom_smooth(method='loess', color = 'blue')
+
+ggplot(data = events, aes(x = dUTP_vs_SON_exp, y = dUTP_vs_SON_obs)) + geom_point(size = 1) + geom_abline(slope = 1, intercept = 0) + geom_smooth(method='loess', color = 'blue')
+```
+
+```{r}
+## Evaluate events
+plot_df = events[c('segmentation','cond','image','alter','image_alter','EdU','dUTP','SON')]
+df_temp <- gather(plot_df, 'event','number',-c(1,2,3,4,5))
+
+plot <- ggplot(data = df_temp, aes(x = event, y = number, color = cond)) +
+  geom_point(size = 1) +
+  labs(x = 'condition',
+       y = 'number of segmented regions') +
+  facet_grid(. ~ cond) +
+  theme_light() +
+  theme(text = element_text(size = 17),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+print(plot)
+
+plot <- ggplot(data = df_temp, aes(x = event, y = number, fill = cond)) +
+  geom_boxplot() +
+  #scale_fill_manual(values = c('white','gray')) +
+  labs(x = 'condition',
+       y = 'Number of segmented regions') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  theme(axis.title.x = element_blank(), axis.title.y = element_blank(), text = element_text(size = 17))
+print(plot)
+
+## Plotting ratio of events
+plot_df = events[c('segmentation','cond','image','alter','image_alter','EdU_prop','dUTP_prop','SON_prop')]
+df_temp <- gather(plot_df, 'event','number',-c(1,2,3,4,5))
+
+plot <- ggplot(data = df_temp, aes(x = event, y = number, color = cond)) +
+  geom_point(size = 1) +
+  ylim(0,max(df_temp$number)) +
+  labs(x = 'condition',
+       y = 'proportion (segmented region / total)') +
+  facet_grid(. ~ cond) +
+  theme_light() +
+  theme(text = element_text(size = 17),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+print(plot)
+
+plot <- ggplot(data = df_temp, aes(x = event, y = number)) +
+  geom_boxplot(aes(fill = cond)) +
+  #scale_fill_manual(name = 'Treatment', values = c('white','gray')) +
+  scale_y_continuous(labels=scales::percent, breaks = seq(0.1,1,0.2)) +
+  labs(x = 'condition',
+       y = 'proportion (segmented region / total)') +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title.x = element_blank(), axis.title.y = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        #legend.position = c(0.845,0.85),
+        legend.background = element_rect(fill="white", linewidth = 0.3, linetype="solid",colour ="black"),
+        text = element_text(size = 17))
+print(plot)
+```
+
+```{r}
+## Plotting ratio of events
+plot_df = events[c('segmentation','cond','image','alter','image_alter','EdU_vs_dUTP')]
+colnames(plot_df) = c('segmentation','cond','image','alter','image_alter','647_vs_555')
+df_temp <- gather(plot_df, 'event','number',-c(1,2,3,4,5))
+
+plot <- ggplot(data = df_temp, aes(x = event, y = number, color = cond)) +
+  geom_point(size = 1) +
+  #ylim(0,max(df_temp$number)) +
+  labs(x = 'condition',
+       y = 'proportion (segmetned region / total)') +
+  facet_grid(alter ~ cond) +
+  theme_light() +
+  theme(text = element_text(size = 17))
+print(plot)
+
+plot <- ggplot(data = df_temp, aes(x = NA, y = number)) +
+  geom_boxplot(aes(fill = cond)) +
+  #scale_fill_manual(name = 'Treatment', values = c('white','gray')) +
+  #coord_cartesian(ylim = c(0, 10)) +
+  labs(x = 'condition',
+       y = 'proportion (event_type / total)') +
+  theme_bw() +
+  facet_grid(event ~ alter, scales ="free_y") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        axis.title.x = element_blank(), axis.title.y = element_blank(),
+        #legend.position = c(0.845,0.85),
+        legend.background = element_rect(fill="white", linewidth = 0.3, linetype="solid",colour ="black"),
+        text = element_text(size = 17))
+print(plot)
+```
+
+```{r}
+k_w <- kruskal.test(number ~ paste(cond,event), data = df_temp)
+print(k_w)
+k_w <- pairwise.wilcox.test(df_temp$number, paste(df_temp$cond,df_temp$event),
+                 p.adjust.method = "bonferroni")$p.value
+pairwise.wilcox.test(plot_df$initiation, plot_df$cond,
+                 p.adjust.method = "BH")
+```
+
+```{r}
+pvalue_df = tibble(event = factor(c('initiation','ongoing','termination'),
+                          levels= c('initiation','ongoing','termination')))
+pvalue_df$.y. = rep('number',3)
+pvalue_df$group1 = rep('Mock',3)
+pvalue_df$group2 = rep('HU',3)
+pvalue_df$p.adj = apply(pvalue_df, 1, function(x){formatC(k_w[paste(x['group1'],x['event']),paste(x['group2'],x['event'])],digits = 2, format = 'g')})
+pvalue_df$y.position = c(0.31,1,0.27)
+pvalue_df$x = seq(1,3)
+pvalue_df$xmin = c(0.81,1.81,2.81)
+pvalue_df$xmax = c(1.19,2.19,3.19)
+
+plot_pval <- plot + stat_pvalue_manual(pvalue_df, label = 'p.adj')
+print(plot_pval)
+ggsave(filename = 'BLL_XZ_Exp4__event_types', plot = plot_pval, device = 'png', path = '/Users/brunourien/SciLifeLab/KI_Organized/Conferences/20241103_Heidelberg_EMBL', height = 4, width = 5,
+       dpi = 450)
+```
+

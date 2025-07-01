@@ -1,0 +1,776 @@
+---
+title: "SIM_BLL_SON__SON_domains"
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+### Load packages
+```{r}
+# When ready to knit document, change all {r} with the following, then knit:
+#{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(broom)
+library(AICcmodavg)
+library(R.utils)
+library(data.table)
+library(gridExtra)
+library(plotly)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+
+### Load functions
+```{r}
+get_cond <- function(path) {
+  cond <- str_match(path,'^(.+)/(.+)/.*tables/')[2]
+  return(cond)
+}
+get_repl <- function(path) {
+  repl <- str_match(path,'^(.+)/(.+)/.*tables/')[3]
+  return(repl)
+}
+get_metadata <- function(path) {
+  meta <- str_match(path,'^(.+)/(.+)/Image ([:digit:]+)_?(.*)__Mask(.*)/.*tables/')
+  return(c(meta[2],meta[3],meta[4],meta[5],meta[6],paste(meta[2],meta[3],meta[4],meta[5],meta[6],sep='_')))
+}
+get_channel <- function(path) {
+  channel <- str_match(path,'/.+_(.+)\\.csv\\.gz$')
+  return(channel[2])
+}
+```
+
+```{r}
+make_plots_general <- function(res_dir,df,measurement_colname,channel_col = FALSE){
+  if(channel_col){x_vals = df[,'channel']}
+  else{x_vals = df[,'cond']}
+  plot = ggplot(df, aes(x = x_vals, y = df[,measurement_colname])) +
+    geom_violin() +
+    labs(
+      title = paste(res_dir,'violin plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+  
+  plot = ggplot(df, aes(x = x_vals, y = df[,measurement_colname])) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_y_continuous(limits = quantile(df[,measurement_colname], c(0.1, 0.9))) +
+    labs(
+      title = paste(res_dir,'box plot',sep = '\n'),
+      x = "Condition",
+      y = measurement_colname
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+  
+  plot = ggplot(df, aes(x = df[,measurement_colname], colour = x_vals)) +
+    geom_density() +
+    labs(
+      title = paste(res_dir,'distance density plot',sep = '\n'),
+      x = measurement_colname,
+      y = "Density"
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+  
+  plot = ggplot(L, aes(x = df[,measurement_colname], colour = x_vals)) +
+    geom_density(stat='bin',bins=30) +
+    labs(
+      title = paste(res_dir,'distance event count profile (30-bin)',sep = '\n'),
+      x = measurement_colname,
+      y = "Count"
+    ) +
+    theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+  if(channel_col){plot = plot + facet_grid(cond ~ alter)}
+  else{plot = plot + facet_grid(. ~ alter)}
+  print(plot)
+}
+```
+
+```{r}
+make_plots_per_image <- function(res_dir,df,measurement_colname,channel_col = FALSE){
+  for(level in levels(as.factor(df$cond))){
+    for(sublevel in levels(as.factor(df$alter))){
+      df_sub = df[df$cond == level,]
+      df_sub = df_sub[df_sub$alter == sublevel,]
+      if(dim(df_sub)[1] == 0){next}
+      if(channel_col){x_vals = df_sub[,'channel']}
+      else{x_vals = df_sub[,'image']}
+      plot <- ggplot(df_sub, aes(x = x_vals, y = df_sub[,measurement_colname])) +
+        geom_violin() +
+        labs(
+          title = paste(res_dir, level,sublevel,'violin plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+      
+      plot = ggplot(df_sub, aes(x = x_vals, y = df_sub[,measurement_colname])) +
+        geom_boxplot(outlier.shape = NA) +
+        scale_y_continuous(limits = quantile(df_sub[,measurement_colname], c(0.1, 0.9))) +
+        labs(
+          title = paste(res_dir, level,sublevel,'box plot',sep = '\n'),
+          x = paste('Condition:',level,';','Subtype:',sublevel,sep = ' '),
+          y = measurement_colname
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+    
+      plot <- ggplot(df_sub, aes(x = df_sub[,measurement_colname], colour = x_vals)) +
+        geom_density() +
+        labs(
+          title = paste(res_dir, level,sublevel,'distance density plot',sep = '\n'),
+          x = measurement_colname,
+          y = "Density"
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+      
+      plot <- ggplot(df_sub, aes(x = df_sub[,measurement_colname], colour = x_vals)) +
+        geom_density(stat='bin',bins=30) +
+        labs(
+          title = paste(res_dir, level,'Number of events per image',sep = '\n'),
+          x = measurement_colname,
+          y = "Count"
+        ) +
+        theme(panel.background = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+      if(channel_col){plot = plot + facet_grid(. ~ image)}
+      print(plot)
+    }
+  }
+}  
+```
+
+```{r}
+summarise_every_image <- function(res_dir,df,measurement_colnames){
+    
+  data_metrics = df %>% group_by(segmentation,cond,image,alter,channel) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, median = median, sd = sd)))
+  return(data_metrics)
+}
+
+summarise_per_cond <- function(res_dir,df,measurement_colnames,channel_col = FALSE){
+  if(channel_col){
+    data_metrics = df %>% group_by(cond,image,alter,channel) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, sd = sd)))
+  }
+  else{
+    data_metrics = df %>% group_by(cond,alter) %>% na.omit() %>%
+    summarise(across(measurement_colnames, list(mean = mean, sd = sd)))}
+  return(data_metrics)
+}
+```
+
+```{r}
+merge_rows <- function(group) {
+  group %>%
+    summarise(
+      across(everything(), ~ first(na.omit(.)), .names = "{col}"),
+      dUTP_0 = first(na.omit(dUTP_0)),
+      dUTP_1 = first(na.omit(dUTP_1))
+    )
+}
+
+merge_rows2 <- function(group) {
+  group %>%
+    summarise(
+      across(everything(), ~ first(na.omit(.)), .names = "{col}"),
+      EdU_0 = first(na.omit(EdU_0)),
+      EdU_1 = first(na.omit(EdU_1))
+    )
+}
+```
+
+
+# SON DOMAIN ANALYSIS
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+L <- data.frame()
+
+### For all regions, find corresponding segmented volume to do ratio of overlapping volume.
+paths_EdU_SON <- Sys.glob("*/*/*/overlap_tables/two_channel_common__EdU_vs_SON_102_intersection_regions.csv.gz")
+paths_EdU_notSON <- gsub("EdU_vs_SON","EdU_vs_dUTP",paths_EdU_SON)
+paths_single_channel_EdU <- gsub("overlap_tables/.+","tables/004_segmented_regions_EdU.csv.gz",paths_EdU_SON)
+
+paths_dUTP_SON <- Sys.glob("*/*/*/overlap_tables/two_channel_common__dUTP_vs_SON_102_intersection_regions.csv.gz")
+paths_dUTP_notSON <- gsub("dUTP_vs_SON","EdU_vs_dUTP",paths_dUTP_SON)
+paths_single_channel_dUTP <- gsub("overlap_tables/.+","tables/004_segmented_regions_dUTP.csv.gz",paths_dUTP_SON)
+
+paths_SON = c(paths_EdU_SON,paths_dUTP_SON)
+paths_notSON = c(paths_EdU_notSON,paths_dUTP_notSON)
+paths_single_channel = c(paths_single_channel_EdU, paths_single_channel_dUTP)
+channel = c(rep("EdU",length(paths_EdU_SON)),rep("dUTP",length(paths_dUTP_SON)))
+
+for(pos in seq(length(paths_single_channel))){
+  single_channel <- read.csv(paths_single_channel[pos], sep = "\t")[,c(1:3)]
+  single_channel$path = rep(paths_single_channel[pos],dim(single_channel)[1])
+  if(dim(single_channel)[1] == 0){next}
+  single_channel$channel = rep(channel[pos],dim(single_channel)[1])
+  single_channel$overlap_SON = rep(0,dim(single_channel)[1])
+  single_channel$overlap_notSON = rep(0,dim(single_channel)[1])
+  temp_df <- read.csv(paths_SON[pos], sep = "\t")[,c(1:5)]
+  if(dim(temp_df)[1] > 0){
+    match_temp_df = match(temp_df[,channel[pos]],single_channel$label)
+    for(temp_pos in seq(dim(temp_df)[1])){
+      single_channel_pos = match_temp_df[temp_pos]
+      single_channel[single_channel_pos,"overlap_SON"] = single_channel[single_channel_pos,"overlap_SON"] + temp_df[temp_pos,"area"]
+    }
+  }
+  temp_df <- read.csv(paths_notSON[pos], sep = "\t")[,c(1:5)]
+  if(dim(temp_df)[1] > 0){
+    match_temp_df = match(temp_df[,channel[pos]],single_channel$label)
+    for(temp_pos in seq(dim(temp_df)[1])){
+      single_channel_pos = match_temp_df[temp_pos]
+      single_channel[single_channel_pos,"overlap_notSON"] = single_channel[single_channel_pos,"overlap_notSON"] + temp_df[temp_pos,"area"]
+    }
+  }
+  L <- rbind(L,single_channel)
+}
+L$ratio_SON = L$overlap_SON/L$area
+L$ratio_notSON = L$overlap_notSON/L$area
+
+metadata = t(sapply(L$path,get_metadata))
+rownames(metadata) = rownames(L)
+colnames(metadata) = c('segmentation','cond','image','alter','mask','image_full_id')
+L <- cbind(L,metadata)
+
+event_count <- data.frame(table(L$cond))
+colnames(event_count) <- c('condition','single_overlap_count')
+print(event_count)
+for(level in levels(as.factor(L$cond))){
+  event_count <- data.frame(table(L[L$cond == level,]$image_full_id))
+  colnames(event_count) <- c(level,'single_overlap_count')
+  print(event_count)
+}
+L$cond[L$cond == 'slide 1'] = 'Short'
+L$cond[L$cond == 'slide 2'] = 'Long'
+L$cond <- factor(L$cond,levels = c('Short','Long'))
+L$image <- factor(L$image)
+L$alter <- factor(L$alter)
+L$image_full_id <- factor(L$image_full_id)
+```
+
+```{r}
+L_sub = L[L$segmentation == 'raw__ss_1__os_0__min_size_50__min_size_overlap_0',]
+L_sub = L_sub[L_sub$cond == "Short",]
+
+print("Fraction of EdU regions that overlap with SON")
+print(sum(L_sub$ratio_SON[L_sub$channel == "EdU"] > 0)/dim(L_sub)[1])
+print("Fraction of EdU regions that overlap with dUTP")
+print(sum(L_sub$ratio_notSON[L_sub$channel == "EdU"] > 0)/dim(L_sub)[1])
+plot_overlap_SON = ggplot(L_sub[L_sub$channel == "EdU" & L_sub$ratio_SON > 0,],aes(x = ratio_SON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of EdU overlapping with SON")
+print(plot_overlap_SON)
+plot_overlap_notSON = ggplot(L_sub[L_sub$channel == "EdU" & L_sub$ratio_notSON > 0,],aes(x = ratio_notSON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of EdU overlapping with dUTP")
+print(plot_overlap_notSON)
+
+print("Fraction of dUTP regions that overlap with SON")
+print(sum(L_sub$ratio_SON[L_sub$channel == "dUTP"] > 0)/dim(L_sub)[1])
+print("Fraction of dUTP regions that overlap with EdU")
+print(sum(L_sub$ratio_notSON[L_sub$channel == "dUTP"] > 0)/dim(L_sub)[1])
+plot_overlap_SON = ggplot(L_sub[L_sub$channel == "dUTP" & L_sub$ratio_SON > 0,],aes(x = ratio_SON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of dUTP overlapping with SON")
+print(plot_overlap_SON)
+plot_overlap_notSON = ggplot(L_sub[L_sub$channel == "dUTP" & L_sub$ratio_notSON > 0,],aes(x = ratio_notSON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of dUTP overlapping with EdU")
+print(plot_overlap_notSON)
+
+L_sub = L[L$cond == "Long",]
+
+print("Fraction of EdU regions that overlap with SON")
+print(sum(L_sub$ratio_SON[L_sub$channel == "EdU"] > 0)/dim(L_sub)[1])
+print("Fraction of EdU regions that overlap with dUTP")
+print(sum(L_sub$ratio_notSON[L_sub$channel == "EdU"] > 0)/dim(L_sub)[1])
+plot_overlap_SON = ggplot(L_sub[L_sub$channel == "EdU" & L_sub$ratio_SON > 0,],aes(x = ratio_SON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of EdU overlapping with SON")
+print(plot_overlap_SON)
+plot_overlap_notSON = ggplot(L_sub[L_sub$channel == "EdU" & L_sub$ratio_notSON > 0,],aes(x = ratio_notSON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of EdU overlapping with dUTP")
+print(plot_overlap_notSON)
+
+print("Fraction of dUTP regions that overlap with SON")
+print(sum(L_sub$ratio_SON[L_sub$channel == "dUTP"] > 0)/dim(L_sub)[1])
+print("Fraction of dUTP regions that overlap with EdU")
+print(sum(L_sub$ratio_notSON[L_sub$channel == "dUTP"] > 0)/dim(L_sub)[1])
+plot_overlap_SON = ggplot(L_sub[L_sub$channel == "dUTP" & L_sub$ratio_SON > 0,],aes(x = ratio_SON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of dUTP overlapping with SON")
+print(plot_overlap_SON)
+plot_overlap_notSON = ggplot(L_sub[L_sub$channel == "dUTP" & L_sub$ratio_notSON > 0,],aes(x = ratio_notSON)) +
+  geom_density() +
+  labs(title = "Overlap distribution of dUTP overlapping with EdU")
+print(plot_overlap_notSON)
+```
+
+
+```{r}
+L_final = data.frame()
+L_SON = L[,-c(7,9)]
+L_SON$ratio = L_SON$ratio_SON
+L_SON$pair = paste(L_SON$channel,"in SON")
+L_SON = L_SON[,-c(6,7)]
+L_notSON = L[,-c(6,8)]
+L_notSON$ratio = L_notSON$ratio_notSON
+opposite_channel = rep("EdU",dim(L_notSON)[1])
+opposite_channel[L_notSON$channel == "EdU"] = "dUTP"
+L_notSON$pair = paste(L_notSON$channel,"in",opposite_channel)
+L_notSON = L_notSON[,-c(6,7)]
+L_final = rbind(L_SON,L_notSON)
+L_final$pair = factor(L_final$pair,levels = unique(L_final$pair))
+L_final = L_final %>% group_by(segmentation,cond,image,alter,channel,pair) %>% na.omit() %>% summarise(total = n(),mean_prop_overlap = mean(ratio == 0))
+value_cols = c("ratio")
+
+plot <- ggplot(L_final, aes(x = pair, y = mean_prop_overlap)) +
+    geom_violin(aes(fill = pair)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    #ylim(c(0,0.85)) +
+    labs(title = paste('all segmented regions','','median per image',sep='\n'),
+         x = 'condition',
+         y = "proportion of non-overlapping segmented regions per channel") +
+    #scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    facet_grid(. ~ cond) +
+    coord_flip()
+print(plot)
+```
+
+```{r}
+L_test = L_final
+k_w <- kruskal.test(mean_prop_overlap ~ paste(cond,pair), data = L_test)
+print(k_w)
+k_w <- pairwise.wilcox.test(L_test$mean_prop_overlap, paste(L_test$cond,L_test$pair),
+                 p.adjust.method = "bonferroni")$p.value
+print(k_w)
+```
+
+
+```{r}
+L_final = data.frame()
+L_SON = L[L$ratio_SON > 0,-c(7,9)]
+L_SON$ratio = L_SON$ratio_SON
+L_SON$pair = paste(L_SON$channel,"in SON")
+L_SON = L_SON[,-c(6,7)]
+L_notSON = L[L$ratio_notSON > 0,-c(6,8)]
+L_notSON$ratio = L_notSON$ratio_notSON
+opposite_channel = rep("EdU",dim(L_notSON)[1])
+opposite_channel[L_notSON$channel == "EdU"] = "dUTP"
+L_notSON$pair = paste(L_notSON$channel,"in",opposite_channel)
+L_notSON = L_notSON[,-c(6,7)]
+L_final = rbind(L_SON,L_notSON)
+L_final$pair = factor(L_final$pair,levels = unique(L_final$pair))
+value_cols = c("ratio")
+metrics_every_image = L_final %>% group_by(segmentation,cond,image,alter,channel,pair) %>% na.omit() %>%
+    summarise(across("ratio", list(mean = mean, median = median, sd = sd)))
+#metrics = as.data.frame(summarise_per_cond(res_dir,L,value_cols))
+#print(c(min(metrics_every_image$dist_to_SON_median),max(metrics_every_image$dist_to_SON_median)))
+
+plot <- ggplot(metrics_every_image, aes(x = pair, y = ratio_median)) +
+    geom_violin(aes(fill = pair)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    #ylim(c(0,0.85)) +
+    labs(title = paste('all segmented regions','','median per image',sep='\n'),
+         x = 'condition',
+         y = 'overlap volume / segmented region volume') +
+    #scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    facet_grid(. ~ cond) +
+    coord_flip()
+print(plot)
+```
+
+```{r}
+L_test = metrics_every_image
+k_w <- kruskal.test(ratio_median ~ paste(cond,pair), data = L_test)
+print(k_w)
+k_w <- pairwise.wilcox.test(L_test$ratio_median, paste(L_test$cond,L_test$pair),
+                 p.adjust.method = "bonferroni")$p.value
+print(k_w)
+```
+
+### LEGACY (missing dist_to_SON data retrieval)
+
+## --- Ongoing forks ---
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- c(Sys.glob("raw_*/*/*/overlap_tables/*_ongoing__EdU_vs_dUTP_105_overlap_labels.csv.gz"))
+ongoing <- map(paths, fread, header = TRUE, sep = '\t')
+names(ongoing) = paths
+ongoing <- dplyr::bind_rows(ongoing, .id = "path")
+colnames(ongoing) <- str_replace_all(colnames(ongoing),' ','_')
+metadata = t(sapply(ongoing$path,get_metadata))
+rownames(metadata) = rownames(ongoing)
+colnames(metadata) = c('segmentation','cond','image','alter','mask','image_full_id')
+ongoing <- cbind(ongoing,metadata)
+ongoing$channel = sapply(ongoing$path,function(x){str_match(string = x,pattern = '_([:alpha:]+)\\.csv\\.gz$')[2]})
+
+ongoing$cond[ongoing$cond == 'slide 1'] = 'Short'
+ongoing$cond[ongoing$cond == 'slide 2'] = 'Long'
+ongoing$cond <- factor(ongoing$cond,levels = c('Short','Long'))
+ongoing$image <- factor(ongoing$image)
+ongoing$alter <- factor(ongoing$alter)
+ongoing$image_full_id <- factor(ongoing$image_full_id)
+
+ong = data.frame()
+for (image_id in levels(ongoing$image_full_id)){
+  ong = rbind(ong, L[((L$image_full_id == image_id) & (L$channel == 'EdU') & (L$INDEX %in% ongoing$EdU[ongoing$image_full_id == image_id])),])
+  #ong = rbind(ong, L[((L$image_full_id == image_id) & (L$channel == 'dUTP') & (L$INDEX %in% ongoing$dUTP[ongoing$image_full_id == image_id])),])
+}
+```
+
+## Initiation events
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- c(Sys.glob("raw_*/*/*/overlap_tables/*_initiation__EdU_vs_dUTP_105_overlap_labels.csv.gz"))
+initiation <- map(paths, fread, header = TRUE, sep = '\t')
+names(initiation) = paths
+initiation <- dplyr::bind_rows(initiation, .id = "path")
+colnames(initiation) <- str_replace_all(colnames(initiation),' ','_')
+metadata = t(sapply(initiation$path,get_metadata))
+rownames(metadata) = rownames(initiation)
+colnames(metadata) = c('segmentation','cond','image','alter','mask','image_full_id')
+initiation <- cbind(initiation,metadata)
+initiation$channel = sapply(initiation$path,function(x){str_match(string = x,pattern = '_([:alpha:]+)\\.csv\\.gz$')[2]})
+
+initiation$cond[initiation$cond == 'slide 1'] = 'Short'
+initiation$cond[initiation$cond == 'slide 2'] = 'Long'
+initiation$cond <- factor(initiation$cond,levels = c('Short','Long'))
+initiation$image <- factor(initiation$image)
+initiation$alter <- factor(initiation$alter)
+initiation$image_full_id <- factor(initiation$image_full_id)
+
+init = data.frame()
+for (image_id in levels(initiation$image_full_id)){
+  init = rbind(init, L[((L$image_full_id == image_id) & (L$channel == 'EdU') & (L$INDEX %in% initiation$EdU[initiation$image_full_id == image_id])),])
+  #init = rbind(init, L[((L$image_full_id == image_id) & (L$channel == 'dUTP_0') & (L$INDEX %in% initiation$dUTP[initiation$image_full_id == image_id])),])
+  #init = rbind(init, L[((L$image_full_id == image_id) & (L$channel == 'dUTP_1') & (L$INDEX %in% initiation$dUTP[initiation$image_full_id == image_id])),])
+}
+```
+
+## Termination events
+```{r}
+res_dir <- str_extract(getwd(), '([^/]+)$')
+
+letter_size = 10
+
+paths <- c(Sys.glob("raw_*/*/*/overlap_tables/*_termination__EdU_vs_dUTP_105_overlap_labels.csv.gz"))
+termination <- map(paths, fread, header = TRUE, sep = '\t')
+names(termination) = paths
+termination <- dplyr::bind_rows(termination, .id = "path")
+colnames(termination) <- str_replace_all(colnames(termination),' ','_')
+metadata = t(sapply(termination$path,get_metadata))
+rownames(metadata) = rownames(termination)
+colnames(metadata) = c('segmentation','cond','image','alter','mask','image_full_id')
+termination <- cbind(termination,metadata)
+termination$channel = sapply(termination$path,function(x){str_match(string = x,pattern = '_([:alpha:]+)\\.csv\\.gz$')[2]})
+
+termination$cond[termination$cond == 'slide 1'] = 'Short'
+termination$cond[termination$cond == 'slide 2'] = 'Long'
+termination$cond <- factor(termination$cond,levels = c('Short','Long'))
+termination$image <- factor(termination$image)
+termination$alter <- factor(termination$alter)
+termination$image_full_id <- factor(termination$image_full_id)
+
+term = data.frame()
+for (image_id in levels(termination$image_full_id)){
+  #term = rbind(term, L[((L$image_full_id == image_id) & (L$channel == 'EdU_0') & (L$INDEX %in% termination$EdU[termination$image_full_id == image_id])),])
+  #term = rbind(term, L[((L$image_full_id == image_id) & (L$channel == 'EdU_1') & (L$INDEX %in% termination$EdU[termination$image_full_id == image_id])),])
+  term = rbind(term, L[((L$image_full_id == image_id) & (L$channel == 'dUTP') & (L$INDEX %in% termination$dUTP[termination$image_full_id == image_id])),])
+}
+```
+
+```{r}
+all_events = rbind(init,ong,term)
+all_events$event_type = c(rep('initiation',dim(init)[1]),rep('ongoing',dim(ong)[1]),rep('termination',dim(term)[1]))
+```
+
+### Add column with the ranges of distances close to SON: SON_data_EdU/dUTP
+```{r}
+plot <- ggplot(L, aes(dist_to_SON, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('gray','darkorange')) +
+  coord_cartesian(xlim = c(0,1)) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.direction = "out",
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", colour = "white"),
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  ) +
+  labs(title = 'segmented regions - distance to SON',
+       x = 'distance to SON (micrometer)') +
+  facet_grid(. ~ cond)
+
+print(plot)
+
+plot <- ggplot(all_events, aes(dist_to_SON, color = event_type)) +
+  geom_density(size = 1.1) +
+  #scale_color_manual(values = c('gray','darkorange')) +
+  coord_cartesian(xlim = c(0,1)) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.direction = "out",
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", colour = "white"),
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  ) +
+  labs(title = 'events - distance to SON',
+       x = 'distance to SON (micrometer)') +
+  facet_grid(. ~ cond)
+
+print(plot)
+
+all_regs <- L
+all_regs$event_type = rep("all_regs",dim(all_regs)[1])
+all_together <- rbind(all_events, all_regs)
+
+plot <- ggplot(all_together, aes(dist_to_SON, color = event_type)) +
+  geom_density(size = 1.1) +
+  #scale_color_manual(values = c('gray','darkorange')) +
+  coord_cartesian(xlim = c(0,1)) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.direction = "out",
+    strip.background = element_blank(),
+    strip.text.x = element_text(size = 12, face = "bold"),
+    axis.line = element_line(color = "black"),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    plot.background = element_rect(fill = "white", colour = "white"),
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  ) +
+  labs(title = 'all regions with events - distance to SON',
+       x = 'distance to SON (micrometer)') +
+  facet_grid(. ~ cond)
+
+print(plot)
+```
+
+
+```{r}
+plot <- ggplot(L, aes(dist_to_SON, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('lightblue2','darkorange')) +
+  coord_cartesian(xlim = c(0,2)) +
+  theme_bw() +
+  labs(title = 'all regions - distance to SON',
+       x = 'distance to center (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+
+plot <- ggplot(init, aes(dist_to_SON, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('lightblue2','darkorange')) +
+  coord_cartesian(xlim = c(0,2)) +
+  theme_bw() +
+  labs(title = 'initiation events - distance to SON',
+       x = 'distance to center (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+
+plot <- ggplot(ong, aes(dist_to_SON, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('lightblue2','darkorange')) +
+  coord_cartesian(xlim = c(0,2)) +
+  theme_bw() +
+  labs(title = 'ongoing forks - distance to SON',
+       x = 'distance to center (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+
+plot <- ggplot(term, aes(dist_to_SON, color = cond)) +
+  geom_density(size = 1.1) +
+  scale_color_manual(values = c('lightblue2','darkorange')) +
+  coord_cartesian(xlim = c(0,2)) +
+  theme_bw() +
+  labs(title = 'termination events - distance to SON',
+       x = 'distance to center (micrometer)') #+facet_grid(channel ~ .)
+
+print(plot)
+```
+
+```{r}
+value_cols = c("dist_to_SON")
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,L,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,L,value_cols))
+print(c(min(metrics_every_image$dist_to_SON_median),max(metrics_every_image$dist_to_SON_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    ylim(c(0,0.85)) +
+    labs(title = paste('all segmented regions','','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    #facet_grid(channel ~ alter) +
+    coord_flip()
+  print(plot)
+}
+
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,init,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,init,value_cols))
+print(c(min(metrics_every_image$dist_to_SON_median),max(metrics_every_image$dist_to_SON_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    ylim(c(0,0.85)) +
+    labs(title = paste('initiation events','','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    #facet_grid(channel ~ alter) +
+    coord_flip()
+  print(plot)
+}
+
+
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,ong,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,ong,value_cols))
+print(c(min(metrics_every_image$dist_to_SON_median),max(metrics_every_image$dist_to_SON_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    ylim(c(0,0.85)) +
+    labs(title = paste('ongoing events','','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    #facet_grid(channel ~ alter) +
+    coord_flip()
+  print(plot)
+}
+
+
+metrics_every_image = as.data.frame(summarise_every_image(res_dir,term,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,term,value_cols))
+print(c(min(metrics_every_image$dist_to_SON_median),max(metrics_every_image$dist_to_SON_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = cond, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = cond)) +
+    geom_boxplot(width = 0.2) +
+    geom_point() +
+    ylim(c(0,0.85)) +
+    labs(title = paste('termination events','','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    #facet_grid(channel ~ alter) +
+    coord_flip()
+  print(plot)
+}
+```
+
+```{r}
+value_cols = c("dist_to_SON")
+metrics_every_image = as.data.frame(all_events %>% group_by(full_image_id,segmentation,cond,image,alter,mask,channel,event_type) %>% na.omit() %>%
+    summarise(across("dist_to_SON", list(mean = mean, median = median, sd = sd))))
+#metrics_every_image = as.data.frame(summarise_every_image(res_dir,all_events,value_cols))
+metrics = as.data.frame(summarise_per_cond(res_dir,all_events,value_cols))
+print(c(min(metrics_every_image$dist_to_SON_median),max(metrics_every_image$dist_to_SON_median)))
+for(measurement_colname in value_cols){
+  mean_col = paste(measurement_colname,'mean',sep = '_')
+  median_col = paste(measurement_colname,'median',sep = '_')
+  sd_col = paste(measurement_colname,'sd',sep = '_')
+  plot <- ggplot(metrics_every_image, aes(x = event_type, y = metrics_every_image[,median_col])) +
+    geom_violin(aes(fill = event_type)) +
+    geom_boxplot(width = 0.2, outlier.shape = NA) +
+    geom_point(size = 0.5) +
+    #ylim(c(0,0.85)) +
+    labs(title = paste('all dual color events','','median per image',sep='\n'),
+         x = 'condition',
+         y = measurement_colname) +
+    #scale_fill_manual(values = c('lightblue2','darkorange')) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 10)) +
+    facet_grid(. ~ cond) #+ coord_flip()
+  print(plot)
+}
+```
